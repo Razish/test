@@ -10,8 +10,8 @@
 #	CXX			ONLY USE WITH SCAN-BUILD - specify the underlying C++ compiler to use
 #
 # example:
-#	scons -Q --target=test debug=1 force32=1
-#	scan-build scons -Q --target=test,irc debug=1 force32=1 CC=gcc CXX=g++
+#	scons -Q target=test debug=1 force32=1
+#	scan-build scons -Q target=test,irc debug=1 force32=1 CC=gcc CXX=g++
 #
 # envvars:
 #	MORE_WARNINGS	enable additional warnings
@@ -104,28 +104,61 @@ elif realcc is None and realcxx is None:
 
 env['ENV'].update( x for x in os.environ.items() if x[0].startswith( 'CCC_' ) )
 
+build_dir = 'build' + os.sep + configuration + os.sep + realcc + os.sep + str(bits) + os.sep
+env.VariantDir( build_dir, '.', duplicate = 0 )
+
+# targets
+backend = {
+	'Windows': lambda x: [],
+	#TODO: add win32 api files (may need to revise this for cross-compiling and mingw etc)
+
+	'Linux': lambda x: [],
+	'Darwin': lambda x: [],
+	#TODO: add posix/unix files
+}[plat](plat)
+build_targets = {
+	'main': [
+		build_dir + f for f in [
+			'main.c',
+		]
+	] + backend,
+	'minimum-char': [
+		build_dir + f for f in [
+			'minimum-char.c',
+		]
+	] + backend,
+}
+if env.GetOption( 'clean' ):
+	targets = build_targets
+
 # prettify the compiler output
 if 'TERM' in os.environ:
 	env['ENV']['TERM'] = os.environ['TERM']
 import sys
-colours = {}
-enableColours = sys.stdout.isatty()
-colours['white'] = '\033[1;97m' if enableColours else ''
-colours['cyan'] = '\033[96m' if enableColours else ''
-colours['orange'] = '\033[33m' if enableColours else ''
-colours['green'] = '\033[92m' if enableColours else ''
-colours['end']  = '\033[0m' if enableColours else ''
+textctrl = {}
+enableColours = sys.stdout.isatty() # detect ANSI colour support
+textctrl['bold-on'] = '\033[1m' if enableColours else ''
+textctrl['bold-off'] = '\033[21m' if enableColours else ''
+textctrl['grey'] = '\033[90m' if enableColours else ''
+textctrl['red'] = '\033[91m' if enableColours else ''
+textctrl['green'] = '\033[92m' if enableColours else ''
+textctrl['yellow'] = '\033[93m' if enableColours else ''
+textctrl['lightblue'] = '\033[94m' if enableColours else ''
+textctrl['magenta'] = '\033[95m' if enableColours else ''
+textctrl['cyan'] = '\033[96m' if enableColours else ''
+textctrl['white'] = '\033[97m' if enableColours else ''
+textctrl['end']  = '\033[0m' if enableColours else ''
 
 env['SHCCCOMSTR'] = env['SHCXXCOMSTR'] = env['CCCOMSTR'] = env['CXXCOMSTR'] = \
-	'%s compiling: %s$SOURCE%s' % (colours['cyan'], colours['white'], colours['end'])
+	'%s compiling: %s$SOURCE%s' % (textctrl['cyan'], textctrl['white'], textctrl['end'])
 env['ARCOMSTR'] = \
-	'%s archiving: %s$TARGET%s' % (colours['orange'], colours['white'], colours['end'])
+	'%s archiving: %s$TARGET%s' % (textctrl['yellow'], textctrl['white'], textctrl['end'])
 env['RANLIBCOMSTR'] = \
-	'%s  indexing: %s$TARGET%s' % (colours['orange'], colours['white'], colours['end'])
+	'%s  indexing: %s$TARGET%s' % (textctrl['yellow'], textctrl['white'], textctrl['end'])
 env['ASCOMSTR'] = \
-	'%sassembling: %s$TARGET%s' % (colours['orange'], colours['white'], colours['end'])
+	'%sassembling: %s$TARGET%s' % (textctrl['yellow'], textctrl['white'], textctrl['end'])
 env['SHLINKCOMSTR'] = env['LINKCOMSTR'] = \
-	'%s   linking: %s$TARGET%s' % (colours['green'], colours['white'], colours['end'])
+	'%s   linking: %s$TARGET%s' % (textctrl['green'], textctrl['white'], textctrl['end'])
 
 # obtain the compiler version
 import commands
@@ -172,40 +205,51 @@ env.SetOption( 'num_jobs', GetNumCores() )
 # notify the user of the build configuration
 if not env.GetOption( 'clean' ):
 	# build tools
-	msg = 'building '
+	msg = textctrl['white'] + 'building '
 	if revision:
-		msg += revision + ' '
-	msg += 'for ' + plat + ' '
-	if force32:
-		msg += 'forced '
-	msg += str(bits) + ' bits using ' + str(env.GetOption( 'num_jobs' )) + ' threads\n'\
-		+ '\t' + realcc + '/' + realcxx + ': ' + ccversion + '\n'\
-		+ '\tpython: ' + platform.python_version() + '\n'\
-		+ '\tscons: ' + sconsversion + '\n'
+		revision_modified = revision[-1] == '*'
+		if revision_modified:
+			msg += textctrl['bold-on']
+		msg += textctrl['red' if revision_modified else 'green'] + revision + textctrl['white'] + ' '
+		if revision_modified:
+			msg += textctrl['bold-off']
+else:
+	msg = textctrl['white'] + 'cleaning '
 
-	# build options
-	msg += 'options:\n'\
-		+ '\tconfiguration: ' + configuration + '\n'\
-		+ '\tinstruction set: ' + arch\
-			+ ((' with x87 fpu' if 'NO_SSE' in os.environ else ' with SSE') if arch != 'arm' else '') + '\n'
+msg += 'for ' + textctrl['bold-on'] + textctrl['cyan'] + plat + ' '
+msg += (textctrl['red'] if force32 else '') + str(bits) + ' bits' + textctrl['white'] + textctrl['bold-off']\
+	+ ' using ' + textctrl['bold-on'] + str(env.GetOption( 'num_jobs' )) + textctrl['bold-off'] + ' threads\n'
+msg += '\tconfiguration:' + ' ' + textctrl['bold-on'] + textctrl['cyan'] + configuration + textctrl['white']\
+	+ textctrl['bold-off'] + '\n'
+msg += '\tinstruction set:' + ' ' + textctrl['bold-on'] + textctrl['cyan'] + arch + textctrl['white']\
+	+ textctrl['bold-off'] + (' with ' + textctrl['bold-on'] + textctrl['cyan']\
+	+ ('x87 fpu' if 'NO_SSE' in os.environ else 'SSE')\
+	+ textctrl['white'] + textctrl['bold-off'] if arch != 'arm' else '') + '\n\n'
 
-	# build options
-	if targets:
-		msg += 'targets:\n'
-		for t in targets:
-			msg += '\t' + t + '\n'
+msg += '\t' + realcc + '/' + realcxx + ':' + ' ' + textctrl['bold-on'] + ccversion + textctrl['bold-off'] + '\n'
+msg += '\tpython:' + ' ' + textctrl['bold-on'] + platform.python_version() + textctrl['bold-off'] + '\n'
+msg += '\tscons:' + ' ' + textctrl['bold-on'] + sconsversion + textctrl['bold-off'] + '\n\n'
 
-	# build environment
-	if 'SCONS_DEBUG' in os.environ:
-		msg += realcc + ' located at ' + commands.getoutput( 'where ' + realcc ).split( '\n' )[0] + '\n'
-		if 'AR' in env:
-			msg += env['AR'] + ' located at ' + commands.getoutput( 'where ' + env['AR'] ).split( '\n' )[0] + '\n'
-		if 'AS' in env:
-			msg += env['AS'] + ' located at ' + commands.getoutput( 'where ' + env['AS'] ).split( '\n' )[0] + '\n'
-		msg += 'python located at ' + sys.executable + '\n'
-		msg += 'scons' + ' located at ' + commands.getoutput( 'where ' + 'scons' ).split( '\n' )[0] + '\n'
+# build targets
+msg += 'targets:\n'
+for t in build_targets:
+	if t in targets:
+		msg += '\t' + textctrl['bold-on'] + textctrl['green']\
+			+ t + u' \u2713' + textctrl['white'] + textctrl['bold-off'] + '\n'
+	else:
+		msg += '\t' + textctrl['white'] + t + '\n'
 
-	print( msg )
+# build environment
+if 'SCONS_DEBUG' in os.environ:
+	msg += realcc + ' located at ' + commands.getoutput( 'where ' + realcc ).split( '\n' )[0] + '\n'
+	if 'AR' in env:
+		msg += env['AR'] + ' located at ' + commands.getoutput( 'where ' + env['AR'] ).split( '\n' )[0] + '\n'
+	if 'AS' in env:
+		msg += env['AS'] + ' located at ' + commands.getoutput( 'where ' + env['AS'] ).split( '\n' )[0] + '\n'
+	msg += 'python located at ' + sys.executable + '\n'
+	msg += 'scons' + ' located at ' + commands.getoutput( 'where ' + 'scons' ).split( '\n' )[0] + '\n'
+
+print( msg )
 
 # clear default compiler/linker switches
 def emptyEnv( env, e ):
@@ -561,34 +605,6 @@ elif plat == 'Windows':
 	]
 	libs += [lib + ('d' if debug == 1 else '') for lib in dlibs]
 
-build_dir = 'build' + os.sep + configuration + os.sep + realcc + os.sep + str(bits) + os.sep
-env.VariantDir( build_dir, '.', duplicate = 0 )
-
-# targets
-backend = {
-	'Windows': lambda x: [],
-	#TODO: add win32 api files (may need to revise this for cross-compiling and mingw etc)
-
-	'Linux': lambda x: [],
-	'Darwin': lambda x: [],
-	#TODO: add posix/unix files
-}[plat](plat)
-build_targets = {
-	'main': [
-		build_dir + f for f in [
-			'main.c',
-		]
-	] + backend,
-	'minimum-char': [
-		build_dir + f for f in [
-			'minimum-char.c',
-		]
-	] + backend,
-}
-if env.GetOption( 'clean' ):
-	print( 'cleaning all projects' )
-	targets = build_targets
-
 # libraries
 libraries = [
 	# local projects with source to be built into a lib
@@ -616,5 +632,5 @@ for target in targets:
 	binaryName = target + '.' + arch + env['PROGSUFFIX']
 	env.Program( binaryName, build_targets[target] )
 
-	if not env.GetOption( 'clean' ) and not os.path.lexists( './' + target ):
-		print( 'Suggest creating a symlink: "ln -s ' + binaryName + ' ' + target + '"' )
+	#if not env.GetOption( 'clean' ) and not os.path.lexists( './' + target ):
+	#	print( 'Suggest creating a symlink: "ln -s ' + binaryName + ' ' + target + '"' )
